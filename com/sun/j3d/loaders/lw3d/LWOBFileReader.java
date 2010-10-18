@@ -165,9 +165,9 @@ class LWOBFileReader extends BufferedInputStream {
      */
     public String getString() throws ParsingErrorException {
       byte buf[] = new byte[512];
+	  int len = 0;
       try {
 	  byte b;
-	  int len = 0;
 	  do {
 	    b = (byte)read();
 	    buf[len++] = b;
@@ -179,7 +179,8 @@ class LWOBFileReader extends BufferedInputStream {
 	  debugOutputLn(EXCEPTION, "getString: " + e);
 	  throw new ParsingErrorException(e.getMessage());
       }
-      return new String(buf);
+      // len - 1 for skip null byte
+      return new String(buf, 0, len - 1);
     } // End of getString
 
 
