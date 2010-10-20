@@ -108,8 +108,10 @@ class LWOBFileReader extends BufferedInputStream {
      */
     public void skipLength(int amount) throws ParsingErrorException {
 	try {
-	    skip((long)amount);
 	    marker += amount;
+	    while (amount > 0) {
+	    	amount -= skip((long)amount);
+	    }
 	}
 	catch (IOException e) {
 	    debugOutputLn(EXCEPTION, "skipLength: " + e);
