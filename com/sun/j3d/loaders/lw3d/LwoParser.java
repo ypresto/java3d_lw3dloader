@@ -76,6 +76,7 @@ import com.sun.j3d.loaders.IncorrectFormatException;
 class LwoParser extends ParserObject {
 	
     LWOBFileReader theReader;
+	VXReader vxReader;
     int currLength;
     float coordsArray[];
     float normalCoordsArray[];
@@ -88,6 +89,7 @@ class LwoParser extends ParserObject {
     Vector surfNameList = null;
     Vector surfaceList = new Vector(200);	
     Vector shapeList = new Vector(200);
+    Vector<String> tagList = new Vector<String>(200);
 
 	/**
 	* Constructor: Creates file reader and calls parseFile() to actually
@@ -100,6 +102,7 @@ class LwoParser extends ParserObject {
 	debugOutputLn(TRACE, "parser()");
 	long start = System.currentTimeMillis();
 	theReader = new LWOBFileReader(fileName);
+	vxReader = new VXReader();
 	debugOutputLn(TIME, " file opened in " +
 		      (System.currentTimeMillis() - start));
 	parseFile();
@@ -112,6 +115,7 @@ class LwoParser extends ParserObject {
       try {
 	long start = System.currentTimeMillis();
 	theReader = new LWOBFileReader(url);
+	vxReader = new VXReader();
 	debugOutputLn(TIME, " file opened in " + 
 		      (System.currentTimeMillis() - start));
       }
@@ -121,6 +125,30 @@ class LwoParser extends ParserObject {
       parseFile();
   }
 		
+	/**
+	 * Variable-length Index Reader
+	 */
+	class VXReader {
+		int length = 0;
+		VXReader instance = null;
+		
+		int getVX() {
+			int data = theReader.getShortInt();
+			if (data < 0xFF00) {
+				this.length = 2;
+			}
+			else {
+				this.length = 4;
+				// mask out first 8 bits and shift 16 bits left, because they are the high-order bits
+				data = ((data & 0x00FF) << 16) | theReader.getShortInt();
+			}
+			return data;
+		}
+		
+		int getLastLength() {
+			return length;
+		}
+	}
 
 	/**
 	* Detail polygons are currently not implemented by this loader.  Their
@@ -255,6 +283,96 @@ class LwoParser extends ParserObject {
     }
 
 	/**
+	* Parse the file for all the data for a POLS object (polygon 
+	* description)
+	*/ 
+    void getPolsLwo2(int length) {
+	debugOutputLn(TRACE, "getPolsLwo2(len), len = " + length);
+	int vert;
+	int lengthRead = 0;
+	int prevNumVerts = -1;
+	int prevNumSurf = 0;
+	Vector facetSizesList;
+	int facetIndicesArray[];
+	facetSizesList =
+	    new Vector(length/6);  // worst case size (every poly one vert)
+		// Note that our array sizes are hardcoded because we don't
+		// know until we're done how large they will be
+	facetIndicesArray = new int[length/2];
+	ShapeHolder shape = new ShapeHolder(debugPrinter.getValidOutput());
+	debugOutputLn(VALUES, "new shape = " + shape);
+	shape.coordsArray = coordsArray;
+	shape.facetSizesList = facetSizesList;
+	//shape.facetIndicesList = facetIndicesList;
+	shape.facetIndicesArray = facetIndicesArray;
+	shapeList.addElement(shape);
+		
+    //long startTime = (new Date()).getTime();
+	boolean firstTime = true;
+	String type = theReader.getToken();
+	lengthRead += 4;
+	while (lengthRead < length) {
+	    int numVerts = theReader.getShortInt() & 0x03FF; // 6 high-order bits are flag, now ignore it (max verts = 1023)
+	    lengthRead += 2;
+	    int intArray[] = new int[numVerts];
+	    for (int i = 0; i < numVerts; ++i) {
+		intArray[i] = vxReader.getVX();
+		lengthRead += vxReader.getLastLength();
+	    }
+
+/*	    int numSurf = theReader.getShortInt();
+	    lengthRead += 2;
+	    long startTimeBuff = 0, startTimeList = 0;
+	    if (!firstTime &&
+		(numSurf != prevNumSurf ||
+		 ((numVerts != prevNumVerts) &&
+		  ((prevNumVerts < 3) ||
+		   (numVerts < 3))))) {
+		// If above true, then start new shape
+		shape = getAppropriateShape(numSurf, numVerts);
+		if (shape == null) {
+		    //debugOutputLn(LINE_TRACE, "Starting new shape");
+		    facetSizesList = new Vector(length/6);
+		    facetIndicesArray = new int[length/2];
+		    shape = new ShapeHolder(debugPrinter.getValidOutput());
+		    shape.coordsArray = coordsArray;
+		    shape.facetSizesList = facetSizesList;
+		    //shape.facetIndicesList = facetIndicesList;
+		    shape.facetIndicesArray = facetIndicesArray;
+		    shape.numSurf = numSurf;
+		    shape.numVerts = numVerts;
+		    shapeList.addElement(shape);
+		    }
+		else {
+		    facetSizesList = shape.facetSizesList;
+		    facetIndicesArray = shape.facetIndicesArray;
+		}
+	    }
+	    else {
+		shape.numSurf = numSurf;
+		shape.numVerts = numVerts;
+	    }
+	    prevNumVerts = numVerts;
+	    prevNumSurf = numSurf;
+	    facetSizesList.addElement(new Integer(numVerts));
+
+	    int currPtr = 0;
+	    System.arraycopy(intArray, 0,
+			     facetIndicesArray, shape.currentNumIndices,
+			     numVerts);
+	    shape.currentNumIndices += numVerts;
+	    if (numSurf < 0) {   // neg number means detail poly
+		int numPolys = theReader.getShortInt();
+		lengthRead += skipDetailPolygons(numPolys);
+		shape.numSurf = ~shape.numSurf & 0xffff;
+		if (shape.numSurf == 0)
+		    shape.numSurf = 1;  // Can't have surface = 0
+	    }
+	    firstTime = false;*/
+	}
+    }
+
+	/**
 	* Parses file to get the names of all surfaces.  Each polygon will
 	* be associated with a particular surface number, which is the index
 	* number of these names
@@ -302,23 +420,71 @@ class LwoParser extends ParserObject {
 	surfaceList.addElement(surf);
     }
 
+	/**
+	* Parses file to get all tag, which can be used to name
+	* surfaces, parts, smoothing groups
+	*/
+    void getTags(int length) {
+	String tagName;
+	tagList = new Vector<String>(length/2);  // worst case size (each name 2 chars long)
+	int stopMarker = theReader.getMarker() + length;
+	while (theReader.getMarker() < stopMarker) {
+	    debugOutputLn(VALUES, "marker, stop = " +
+			  theReader.getMarker() + ", " + stopMarker);
+	    debugOutputLn(LINE_TRACE, "About to call getString");
+	    tagName = theReader.getString();
+	    debugOutputLn(VALUES, "Surfname = " + tagName);
+	    tagList.addElement(tagName);
+	}
+    }
+
+    /*    void parseLwo2Vmap(int dataLength) {
+		debugOutputLn(TRACE, "parseVmap()");
+		int length = 0;
+		int lengthRead = 0;
+		
+		// Every parsing unit begins with a four character string
+		String tokenString = theReader.getToken();
+		lengthRead += 4;
+			    
+		while (!(tokenString == null) &&
+			  lengthRead < dataLength) {
+		    long startTime = System.currentTimeMillis();
+		    // Based on value of tokenString, go to correct parsing method
+		    length = theReader.getShortInt();
+
+		    lengthRead += 2;
+		    //debugOutputLn(VALUES, "length, lengthRead, fileLength = " +
+		    //	      length + ", " + lengthRead + ", " + fileLength);
+		    //debugOutputLn(VALUES, "LWOB marker is at: " + theReader.getMarker());
+
+
+		    lengthRead += length;
+		    if (lengthRead < dataLength) {
+			//debugOutputLn(VALUES, "end of parseLWOB, length, lengthRead = " +
+			    //	  length + ", " + lengthRead);
+			tokenString = theReader.getToken();
+			lengthRead += 4;
+			//debugOutputLn(VALUES, "just got tokenString = " + tokenString);
+		    }
+	}
+	debugOutputLn(TIME, "done with parseVmap");
+    }*/
 
     /**
-     * parses entire file.
-     * return -1 on error or 0 on completion
+     * parses LWOB containts.
      */
-    int parseFile() throws FileNotFoundException, IncorrectFormatException {
-	debugOutputLn(TRACE, "parseFile()");
+    void parseLwob(int dataLength) throws FileNotFoundException, IncorrectFormatException {
+	debugOutputLn(TRACE, "parseLwob()");
 	int length = 0;
 	int lengthRead = 0;
-	int fileLength = 100000;
 	
-	long loopStartTime = System.currentTimeMillis();
 	// Every parsing unit begins with a four character string
 	String tokenString = theReader.getToken();
+	lengthRead += 4;
 		    
 	while (!(tokenString == null) &&
-		  lengthRead < fileLength) {
+		  lengthRead < dataLength) {
 	    long startTime = System.currentTimeMillis();
 	    // Based on value of tokenString, go to correct parsing method
 	    length = theReader.getInt();
@@ -328,17 +494,7 @@ class LwoParser extends ParserObject {
 	    //	      length + ", " + lengthRead + ", " + fileLength);
 	    //debugOutputLn(VALUES, "LWOB marker is at: " + theReader.getMarker());
 
-	    if (tokenString.equals("FORM")) {
-		//debugOutputLn(LINE_TRACE, "got a form");
-		fileLength = length + 4;
-		length = 0;
-		tokenString = theReader.getToken();
-		lengthRead += 4;
-		if (!tokenString.equals("LWOB"))
-		    throw new IncorrectFormatException(
-			"File not of FORM-length-LWOB format");
-	    }
-	    else if (tokenString.equals("PNTS")) {
+	    if (tokenString.equals("PNTS")) {
 		//debugOutputLn(LINE_TRACE, "PNTS");
 		getPnts(length);
 		debugOutputLn(TIME, "done with " + tokenString + " in " +
@@ -385,7 +541,80 @@ class LwoParser extends ParserObject {
 		    //	(System.currentTimeMillis() - startTime));
 	    }
 	    lengthRead += length;
-	    if (lengthRead < fileLength) {
+	    if (lengthRead < dataLength) {
+		//debugOutputLn(VALUES, "end of parseLwob, length, lengthRead = " +
+		    //	  length + ", " + lengthRead);
+		tokenString = theReader.getToken();
+		lengthRead += 4;
+		//debugOutputLn(VALUES, "just got tokenString = " + tokenString);
+	    }
+	}
+	debugOutputLn(TIME, "done with parseLwob");
+    }
+
+    /**
+     * parses LWO2 containts.
+     */
+    int parseLwo2(int dataLength) throws FileNotFoundException, IncorrectFormatException {
+	debugOutputLn(TRACE, "parseLwo2()");
+	int length = 0;
+	int lengthRead = 0;
+	
+	// Every parsing unit begins with a four character string
+	String tokenString = theReader.getToken();
+	lengthRead += 4;
+		    
+	while (!(tokenString == null) &&
+		  lengthRead < dataLength) {
+	    long startTime = System.currentTimeMillis();
+	    // Based on value of tokenString, go to correct parsing method
+	    length = theReader.getInt();
+
+	    lengthRead += 4;
+	    //debugOutputLn(VALUES, "length, lengthRead, fileLength = " +
+	    //	      length + ", " + lengthRead + ", " + fileLength);
+	    //debugOutputLn(VALUES, "LWO2 marker is at: " + theReader.getMarker());
+
+	    // TODO: Currently LAYRs are skipped
+	    if (tokenString.equals("PNTS")) {
+		//debugOutputLn(LINE_TRACE, "PNTS");
+		getPnts(length);
+		debugOutputLn(TIME, "done with " + tokenString + " in " +
+			      (System.currentTimeMillis() - startTime));
+	    }
+	    // TODO: Currently VMAPs are skipped
+	    else if (tokenString.equals("POLS")) {
+		//debugOutputLn(LINE_TRACE, "POLS");
+		getPolsLwo2(length);
+		debugOutputLn(TIME, "done with " + tokenString + " in " +
+			      (System.currentTimeMillis() - startTime));
+	    }
+	    else if (tokenString.equals("TAGS")) {
+			//debugOutputLn(LINE_TRACE, "SRFS");
+			getTags(length);
+		    debugOutputLn(TIME, "done with " + tokenString + " in " +
+		    (System.currentTimeMillis() - startTime));
+	    }
+	    // TODO: Currently VMADs are skipped
+	    // TODO: Currently VMPAs are skipped
+	    // TODO: Currently ENVLs are skipped
+	    // TODO: Currently CLIPs are skipped
+	    else if (tokenString.equals("SURF")) {
+		//debugOutputLn(LINE_TRACE, "SURF");
+		getSurf(length);
+		//debugOutputLn(VALUES, "Done with SURF, marker = " + theReader.getMarker());
+		debugOutputLn(TIME, "done with " + tokenString + " in " +
+			      (System.currentTimeMillis() - startTime));
+	    }
+	    else {
+		//debugOutputLn(LINE_TRACE, "Unknown object = " + tokenString);
+		theReader.skipLength(length);
+		    //debugOutputLn(TIME, "done with " + tokenString + " in " +
+		    //	(System.currentTimeMillis() - startTime));
+		System.out.println("DEBUG: Not implemented!!: " + tokenString);
+	    }
+	    lengthRead += length;
+	    if (lengthRead < dataLength) {
 		//debugOutputLn(VALUES, "end of parseFile, length, lengthRead = " +
 		    //	  length + ", " + lengthRead);
 		tokenString = theReader.getToken();
@@ -393,8 +622,37 @@ class LwoParser extends ParserObject {
 		//debugOutputLn(VALUES, "just got tokenString = " + tokenString);
 	    }
 	}
+	debugOutputLn(TIME, "done with parseLwo2");
+	return 0;
+    }
+
+	/**
+     * parses entire file.
+     * return -1 on error or 0 on completion
+     */
+    int parseFile() throws FileNotFoundException, IncorrectFormatException {
+	debugOutputLn(TRACE, "parseFile()");
+	
+	long parseStartTime = System.currentTimeMillis();
+	// Every parsing unit begins with a four character string
+	String tokenString = theReader.getToken();
+	int dataLength = theReader.getInt() - 4;
+
+    if (!tokenString.equals("FORM")) {
+    	throw new IncorrectFormatException(
+    	"File is not started with FORM tag");
+    }
+	//debugOutputLn(LINE_TRACE, "got a form");
+	tokenString = theReader.getToken();
+	if (tokenString.equals("LWOB"))
+		parseLwob(dataLength);
+	else if (tokenString.equals("LWO2"))
+		parseLwo2(dataLength);
+	else
+    	throw new IncorrectFormatException(
+    	"File is not started with of FORM-length-LWO{2,B} format");
 	debugOutputLn(TIME, "done with parseFile in " +
-		      (System.currentTimeMillis() - loopStartTime));
+		      (System.currentTimeMillis() - parseStartTime));
 	return 0;
     }
 
