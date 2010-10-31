@@ -46,17 +46,14 @@ package com.sun.j3d.loaders.lw3d;
 
 
 
-import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.Vector;
-import java.util.Date;
+import java.net.URL;
 import java.util.Enumeration;
-import com.sun.j3d.loaders.lw3d.LWOBFileReader;
-import com.sun.j3d.internal.J3dUtilsI18N;
-import java.net.*;
-import com.sun.j3d.loaders.ParsingErrorException;
+import java.util.Vector;
+
 import com.sun.j3d.loaders.IncorrectFormatException;
+import com.sun.j3d.loaders.ParsingErrorException;
 
 
 /**
@@ -74,22 +71,18 @@ import com.sun.j3d.loaders.IncorrectFormatException;
  */
 
 class LwoParser extends ParserObject {
-	
+
+	static final int FORMAT_LWOB = 0;
+	static final int FORMAT_LWO2 = 1;
+
+	int format = FORMAT_LWO2;
+
     LWOBFileReader theReader;
-	VXReader vxReader;
     int currLength;
     float coordsArray[];
-    float normalCoordsArray[];
-    int facetIndicesArray[];
-    int facetSizesArray[];
-    int normalIndicesArray[];
-    int red = 255, green = 255, blue = 255;
-    float diffuse = 0.0f, specular = 0.0f, transparency = 0.0f, luminosity = 0.0f;
-    int gloss = 128;
     Vector surfNameList = null;
     Vector surfaceList = new Vector(200);	
     Vector shapeList = new Vector(200);
-    Vector<String> tagList = new Vector<String>(200);
 
 	/**
 	* Constructor: Creates file reader and calls parseFile() to actually
@@ -102,7 +95,6 @@ class LwoParser extends ParserObject {
 	debugOutputLn(TRACE, "parser()");
 	long start = System.currentTimeMillis();
 	theReader = new LWOBFileReader(fileName);
-	vxReader = new VXReader();
 	debugOutputLn(TIME, " file opened in " +
 		      (System.currentTimeMillis() - start));
 	parseFile();
@@ -115,7 +107,6 @@ class LwoParser extends ParserObject {
       try {
 	long start = System.currentTimeMillis();
 	theReader = new LWOBFileReader(url);
-	vxReader = new VXReader();
 	debugOutputLn(TIME, " file opened in " + 
 		      (System.currentTimeMillis() - start));
       }
@@ -125,31 +116,6 @@ class LwoParser extends ParserObject {
       parseFile();
   }
 		
-	/**
-	 * Variable-length Index Reader
-	 */
-	class VXReader {
-		int length = 0;
-		VXReader instance = null;
-		
-		int getVX() {
-			int data = theReader.getShortInt();
-			if (data < 0xFF00) {
-				this.length = 2;
-			}
-			else {
-				this.length = 4;
-				// mask out first 8 bits and shift 16 bits left, because they are the high-order bits
-				data = ((data & 0x00FF) << 16) | theReader.getShortInt();
-			}
-			return data;
-		}
-		
-		int getLastLength() {
-			return length;
-		}
-	}
-
 	/**
 	* Detail polygons are currently not implemented by this loader.  Their
 	* structure in geometry files is a bit complex, so there's this separate
@@ -283,96 +249,6 @@ class LwoParser extends ParserObject {
     }
 
 	/**
-	* Parse the file for all the data for a POLS object (polygon 
-	* description)
-	*/ 
-    void getPolsLwo2(int length) {
-	debugOutputLn(TRACE, "getPolsLwo2(len), len = " + length);
-	int vert;
-	int lengthRead = 0;
-	int prevNumVerts = -1;
-	int prevNumSurf = 0;
-	Vector facetSizesList;
-	int facetIndicesArray[];
-	facetSizesList =
-	    new Vector(length/6);  // worst case size (every poly one vert)
-		// Note that our array sizes are hardcoded because we don't
-		// know until we're done how large they will be
-	facetIndicesArray = new int[length/2];
-	ShapeHolder shape = new ShapeHolder(debugPrinter.getValidOutput());
-	debugOutputLn(VALUES, "new shape = " + shape);
-	shape.coordsArray = coordsArray;
-	shape.facetSizesList = facetSizesList;
-	//shape.facetIndicesList = facetIndicesList;
-	shape.facetIndicesArray = facetIndicesArray;
-	shapeList.addElement(shape);
-		
-    //long startTime = (new Date()).getTime();
-	boolean firstTime = true;
-	String type = theReader.getToken();
-	lengthRead += 4;
-	while (lengthRead < length) {
-	    int numVerts = theReader.getShortInt() & 0x03FF; // 6 high-order bits are flag, now ignore it (max verts = 1023)
-	    lengthRead += 2;
-	    int intArray[] = new int[numVerts];
-	    for (int i = 0; i < numVerts; ++i) {
-		intArray[i] = vxReader.getVX();
-		lengthRead += vxReader.getLastLength();
-	    }
-
-/*	    int numSurf = theReader.getShortInt();
-	    lengthRead += 2;
-	    long startTimeBuff = 0, startTimeList = 0;
-	    if (!firstTime &&
-		(numSurf != prevNumSurf ||
-		 ((numVerts != prevNumVerts) &&
-		  ((prevNumVerts < 3) ||
-		   (numVerts < 3))))) {
-		// If above true, then start new shape
-		shape = getAppropriateShape(numSurf, numVerts);
-		if (shape == null) {
-		    //debugOutputLn(LINE_TRACE, "Starting new shape");
-		    facetSizesList = new Vector(length/6);
-		    facetIndicesArray = new int[length/2];
-		    shape = new ShapeHolder(debugPrinter.getValidOutput());
-		    shape.coordsArray = coordsArray;
-		    shape.facetSizesList = facetSizesList;
-		    //shape.facetIndicesList = facetIndicesList;
-		    shape.facetIndicesArray = facetIndicesArray;
-		    shape.numSurf = numSurf;
-		    shape.numVerts = numVerts;
-		    shapeList.addElement(shape);
-		    }
-		else {
-		    facetSizesList = shape.facetSizesList;
-		    facetIndicesArray = shape.facetIndicesArray;
-		}
-	    }
-	    else {
-		shape.numSurf = numSurf;
-		shape.numVerts = numVerts;
-	    }
-	    prevNumVerts = numVerts;
-	    prevNumSurf = numSurf;
-	    facetSizesList.addElement(new Integer(numVerts));
-
-	    int currPtr = 0;
-	    System.arraycopy(intArray, 0,
-			     facetIndicesArray, shape.currentNumIndices,
-			     numVerts);
-	    shape.currentNumIndices += numVerts;
-	    if (numSurf < 0) {   // neg number means detail poly
-		int numPolys = theReader.getShortInt();
-		lengthRead += skipDetailPolygons(numPolys);
-		shape.numSurf = ~shape.numSurf & 0xffff;
-		if (shape.numSurf == 0)
-		    shape.numSurf = 1;  // Can't have surface = 0
-	    }
-	    firstTime = false;*/
-	}
-    }
-
-	/**
 	* Parses file to get the names of all surfaces.  Each polygon will
 	* be associated with a particular surface number, which is the index
 	* number of these names
@@ -420,61 +296,10 @@ class LwoParser extends ParserObject {
 	surfaceList.addElement(surf);
     }
 
-	/**
-	* Parses file to get all tag, which can be used to name
-	* surfaces, parts, smoothing groups
-	*/
-    void getTags(int length) {
-	String tagName;
-	tagList = new Vector<String>(length/2);  // worst case size (each name 2 chars long)
-	int stopMarker = theReader.getMarker() + length;
-	while (theReader.getMarker() < stopMarker) {
-	    debugOutputLn(VALUES, "marker, stop = " +
-			  theReader.getMarker() + ", " + stopMarker);
-	    debugOutputLn(LINE_TRACE, "About to call getString");
-	    tagName = theReader.getString();
-	    debugOutputLn(VALUES, "Surfname = " + tagName);
-	    tagList.addElement(tagName);
-	}
-    }
-
-    /*    void parseLwo2Vmap(int dataLength) {
-		debugOutputLn(TRACE, "parseVmap()");
-		int length = 0;
-		int lengthRead = 0;
-		
-		// Every parsing unit begins with a four character string
-		String tokenString = theReader.getToken();
-		lengthRead += 4;
-			    
-		while (!(tokenString == null) &&
-			  lengthRead < dataLength) {
-		    long startTime = System.currentTimeMillis();
-		    // Based on value of tokenString, go to correct parsing method
-		    length = theReader.getShortInt();
-
-		    lengthRead += 2;
-		    //debugOutputLn(VALUES, "length, lengthRead, fileLength = " +
-		    //	      length + ", " + lengthRead + ", " + fileLength);
-		    //debugOutputLn(VALUES, "LWOB marker is at: " + theReader.getMarker());
-
-
-		    lengthRead += length;
-		    if (lengthRead < dataLength) {
-			//debugOutputLn(VALUES, "end of parseLWOB, length, lengthRead = " +
-			    //	  length + ", " + lengthRead);
-			tokenString = theReader.getToken();
-			lengthRead += 4;
-			//debugOutputLn(VALUES, "just got tokenString = " + tokenString);
-		    }
-	}
-	debugOutputLn(TIME, "done with parseVmap");
-    }*/
-
     /**
-     * parses LWOB containts.
-     */
-    void parseLwob(int dataLength) throws FileNotFoundException, IncorrectFormatException {
+	 * parses LWOB containts.
+	 */
+	void parseLwob(int dataLength) throws FileNotFoundException, IncorrectFormatException {
 	debugOutputLn(TRACE, "parseLwob()");
 	int length = 0;
 	int lengthRead = 0;
@@ -488,12 +313,12 @@ class LwoParser extends ParserObject {
 	    long startTime = System.currentTimeMillis();
 	    // Based on value of tokenString, go to correct parsing method
 	    length = theReader.getInt();
-
+	
 	    lengthRead += 4;
 	    //debugOutputLn(VALUES, "length, lengthRead, fileLength = " +
 	    //	      length + ", " + lengthRead + ", " + fileLength);
 	    //debugOutputLn(VALUES, "LWOB marker is at: " + theReader.getMarker());
-
+	
 	    if (tokenString.equals("PNTS")) {
 		//debugOutputLn(LINE_TRACE, "PNTS");
 		getPnts(length);
@@ -550,9 +375,187 @@ class LwoParser extends ParserObject {
 	    }
 	}
 	debugOutputLn(TIME, "done with parseLwob");
-    }
+	}
 
-    /**
+	// Lwo2 specific fields
+    Vector<String> tagList = new Vector<String>(50);
+
+	class Lwo2Polygon extends ShapeHolder {
+		public static final int TYPE_UNKNOWN = 0;
+		public static final int TYPE_SURF = 1;
+		public static final int TYPE_PTCH = 2;
+
+		int type = TYPE_UNKNOWN;
+		int lengthRead = -1;
+		String surfName = null;
+		Lwo2Surface surface = null;
+		// FIXME: ignored properties of polygons, from PTAG specification
+		/* Object part = null;
+		 * Object smoothGrp = null; */
+
+		Lwo2Polygon(String typeString, int debugVals) {
+			super(debugVals);
+			setTypeFromString(typeString);
+			this.coordsArray = LwoParser.this.coordsArray;
+			lengthRead = 0;
+			// Currently ignores any flags
+			numVerts = theReader.getShortInt() & 0x03FF;
+			lengthRead += 2;
+			facetSizesList = new Vector(1);
+			facetSizesList.add(new Integer(numVerts));
+			facetIndicesArray = new int[numVerts];
+			for (int i = 0; i < numVerts; ++i) {
+				facetIndicesArray[i] = (theReader.getVX());
+				lengthRead += theReader.getLastLength();
+			}
+			currentNumIndices = numVerts;
+		}
+
+		public int getLengthRead() {
+			return lengthRead;
+		}
+
+		public int getType() {
+			return type;
+		}
+
+		void setTypeFromString(String typeString) {
+			if (typeString.equals("SURF")) {
+				type = TYPE_SURF;
+			}
+			else if (typeString.equals("PTCH")) {
+				type = TYPE_PTCH;
+			}
+			else {
+				debugOutputLn(WARNING, "Unknown POLS type " + typeString);
+				type = TYPE_UNKNOWN;
+			}
+		}
+
+		public String getSurfName() {
+			return surfName;
+		}
+
+		public void setSurfName(String surfName) {
+			this.surfName = surfName;
+			
+		}
+
+		public Lwo2Surface getSurface() {
+			if (surface == null) {
+				surface = Lwo2Surface.getSurfByName(surfName);
+			}
+			return surface;
+		}
+	}
+
+	/**
+	* Parse the file for all the data for a POLS object (polygon 
+	* description)
+	*/ 
+	void getPolsLwo2(int length) {
+	debugOutputLn(TRACE, "getPolsLwo2(len), len = " + length);
+	int lengthRead = 0;
+	//long startTime = (new Date()).getTime();
+	String type = theReader.getToken();
+	lengthRead += 4;
+	while (lengthRead < length) {
+		Lwo2Polygon pol = new Lwo2Polygon(type, debugPrinter.getValidOutput());
+		lengthRead += pol.getLengthRead();
+		shapeList.add(pol);
+	}
+	}
+
+	/**
+	* Parses file to get all tag, which can be used to name
+	* surfaces, parts, smoothing groups
+	*/
+	void getTagsLwo2(int length) {
+	String tagName;
+	tagList = new Vector<String>(length/2);  // worst case size (each name 2 chars long)
+	int stopMarker = theReader.getMarker() + length;
+	while (theReader.getMarker() < stopMarker) {
+	    debugOutputLn(VALUES, "marker, stop = " +
+			  theReader.getMarker() + ", " + stopMarker);
+	    debugOutputLn(LINE_TRACE, "About to call getString");
+	    tagName = theReader.getString();
+	    debugOutputLn(VALUES, "Surfname = " + tagName);
+	    tagList.addElement(tagName);
+	}
+	}
+
+	/* TODO   void parseLwo2Vmap(int dataLength) {
+		debugOutputLn(TRACE, "parseVmap()");
+		int length = 0;
+		int lengthRead = 0;
+		
+		// Every parsing unit begins with a four character string
+		String tokenString = theReader.getToken();
+		lengthRead += 4;
+			    
+		while (!(tokenString == null) &&
+			  lengthRead < dataLength) {
+		    long startTime = System.currentTimeMillis();
+		    // Based on value of tokenString, go to correct parsing method
+		    length = theReader.getShortInt();
+	
+		    lengthRead += 2;
+		    //debugOutputLn(VALUES, "length, lengthRead, fileLength = " +
+		    //	      length + ", " + lengthRead + ", " + fileLength);
+		    //debugOutputLn(VALUES, "LWOB marker is at: " + theReader.getMarker());
+	
+	
+		    lengthRead += length;
+		    if (lengthRead < dataLength) {
+			//debugOutputLn(VALUES, "end of parseLWOB, length, lengthRead = " +
+			    //	  length + ", " + lengthRead);
+			tokenString = theReader.getToken();
+			lengthRead += 4;
+			//debugOutputLn(VALUES, "just got tokenString = " + tokenString);
+		    }
+	}
+	debugOutputLn(TIME, "done with parseVmap");
+	}*/
+	
+	/**
+	* Parses each ptag, which can be used to associate
+	* tag of given type to polygons in most recent POLS chunk
+	*/
+	void getPtagLwo2(int length) {
+	debugOutputLn(TRACE, "getPtagLwo2(len), len = " + length);
+	int lengthRead = 0;
+	//long startTime = (new Date()).getTime();
+	String type = theReader.getToken();
+	lengthRead += 4;
+	while (lengthRead < length) {
+		Lwo2Polygon pol = (Lwo2Polygon) shapeList.get(theReader.getVX());
+		lengthRead += theReader.getLastLength();
+		String tag = tagList.get(theReader.getShortInt());
+		lengthRead += 2;
+		if (type.equals("SURF")) {
+			pol.setSurfName(tag);
+		}
+		else {
+			debugOutputLn(LINE_TRACE, "Unknown type of PTAG: " + type + " / " + tag);
+		}
+	}
+	}
+
+	/**
+	* Creates new Lwo2Surface object that parses file and gets all
+	* surface parameters for a particular surface
+	*/
+	void getSurfLwo2(int length) throws FileNotFoundException {
+	debugOutputLn(TRACE, "getSurfLwo2()");
+	
+	// Create Lwo2Surface object to read and hold each surface
+	// all surfaces could be retrieved from Lwo2Surface.getSurfByName() static method
+	
+	Lwo2Surface surf = new Lwo2Surface(theReader, length,
+		debugPrinter.getValidOutput());
+	}
+
+	/**
      * parses LWO2 containts.
      */
     int parseLwo2(int dataLength) throws FileNotFoundException, IncorrectFormatException {
@@ -590,28 +593,32 @@ class LwoParser extends ParserObject {
 			      (System.currentTimeMillis() - startTime));
 	    }
 	    else if (tokenString.equals("TAGS")) {
-			//debugOutputLn(LINE_TRACE, "SRFS");
-			getTags(length);
+			//debugOutputLn(LINE_TRACE, "TAGS");
+			getTagsLwo2(length);
 		    debugOutputLn(TIME, "done with " + tokenString + " in " +
 		    (System.currentTimeMillis() - startTime));
 	    }
+		else if (tokenString.equals("PTAG")) {
+			getPtagLwo2(length);
+			debugOutputLn(TIME, "done with " + tokenString + " in " +
+					(System.currentTimeMillis() - startTime));
+		}
 	    // TODO: Currently VMADs are skipped
 	    // TODO: Currently VMPAs are skipped
 	    // TODO: Currently ENVLs are skipped
 	    // TODO: Currently CLIPs are skipped
 	    else if (tokenString.equals("SURF")) {
 		//debugOutputLn(LINE_TRACE, "SURF");
-		getSurf(length);
+		getSurfLwo2(length);
 		//debugOutputLn(VALUES, "Done with SURF, marker = " + theReader.getMarker());
 		debugOutputLn(TIME, "done with " + tokenString + " in " +
 			      (System.currentTimeMillis() - startTime));
 	    }
 	    else {
-		//debugOutputLn(LINE_TRACE, "Unknown object = " + tokenString);
+		debugOutputLn(LINE_TRACE, "Unknown object = " + tokenString);
 		theReader.skipLength(length);
 		    //debugOutputLn(TIME, "done with " + tokenString + " in " +
 		    //	(System.currentTimeMillis() - startTime));
-		System.out.println("DEBUG: Not implemented!!: " + tokenString);
 	    }
 	    lengthRead += length;
 	    if (lengthRead < dataLength) {
@@ -644,13 +651,18 @@ class LwoParser extends ParserObject {
     }
 	//debugOutputLn(LINE_TRACE, "got a form");
 	tokenString = theReader.getToken();
-	if (tokenString.equals("LWOB"))
+	if (tokenString.equals("LWOB")) {
+		format = FORMAT_LWOB;
 		parseLwob(dataLength);
-	else if (tokenString.equals("LWO2"))
+	}
+	else if (tokenString.equals("LWO2")) {
+		format = FORMAT_LWO2;
 		parseLwo2(dataLength);
-	else
+	}
+	else {
     	throw new IncorrectFormatException(
     	"File is not started with of FORM-length-LWO{2,B} format");
+	}
 	debugOutputLn(TIME, "done with parseFile in " +
 		      (System.currentTimeMillis() - parseStartTime));
 	return 0;

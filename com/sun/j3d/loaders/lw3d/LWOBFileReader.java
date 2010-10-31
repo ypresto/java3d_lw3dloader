@@ -72,6 +72,9 @@ class LWOBFileReader extends BufferedInputStream {
 
     protected int marker;
 
+    // should be set when atomic read() occurs
+	protected int lastLength;
+
 
 
     protected void debugOutputLn(int outputType, String theOutput) {
@@ -93,6 +96,7 @@ class LWOBFileReader extends BufferedInputStream {
                 debugOutputLn(LINE_TRACE, "no token - returning null");
                 return null;
             }
+            lastLength = 4;
             return new String(tokenBuffer);
         }
         catch (IOException e) {
@@ -109,6 +113,7 @@ class LWOBFileReader extends BufferedInputStream {
     public void skipLength(int amount) throws ParsingErrorException {
 	try {
 	    marker += amount;
+        lastLength = amount;
 	    while (amount > 0) {
 	    	amount -= skip((long)amount);
 	    }
@@ -133,6 +138,7 @@ class LWOBFileReader extends BufferedInputStream {
 		    throw new ParsingErrorException("Unexpected EOF");
 		x = (x << 8) | readResult;
 	    }
+            lastLength = 4;
             return x;
         }
         catch (IOException e) {
@@ -175,7 +181,13 @@ class LWOBFileReader extends BufferedInputStream {
 	    buf[len++] = b;
 	  } while (b != 0);
 	  // Have to read an even number of bytes
-	  if (len % 2 != 0) read();
+	  if (len % 2 != 0) {
+		  read();
+		  lastLength = len + 1;
+	  }
+	  else {
+		  lastLength = len;
+	  }
       }
       catch (IOException e) {
 	  debugOutputLn(EXCEPTION, "getString: " + e);
@@ -196,6 +208,7 @@ class LWOBFileReader extends BufferedInputStream {
 	ar[i * 3 + 1] = getFloat();
 	ar[i * 3 + 2] = -getFloat();
       }
+      lastLength = num*3*4;
     } // End of getVerts
 
 
@@ -215,6 +228,7 @@ class LWOBFileReader extends BufferedInputStream {
 	    debugOutputLn(EXCEPTION, "getShortInt: " + e);
 	    throw new ParsingErrorException(e.getMessage());
 	}
+	lastLength = 2;
 	return i;
     } // End of getShortInt
 
@@ -245,7 +259,28 @@ class LWOBFileReader extends BufferedInputStream {
 
 
 
-    /**
+    int getVX() {
+		int data = getShortInt();
+		if (data < 0xFF00) {
+			lastLength = 2;
+		}
+		else {
+			// mask out first 8 bits and shift 16 bits left, because they are the high-order bits
+			data = ((data & 0x00FF) << 16) | getShortInt();
+			lastLength = 4;
+		}
+		return data;
+	}
+
+
+
+	public int getLastLength() {
+		return lastLength;
+	}
+
+
+
+	/**
      * Constructor.
      */
     public LWOBFileReader(String filename) throws FileNotFoundException {

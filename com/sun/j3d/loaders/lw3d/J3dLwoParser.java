@@ -115,6 +115,13 @@ class J3dLwoParser extends LwoParser {
 	     e.hasMoreElements() ;) {
 	    int vertexFormat = javax.media.j3d.GeometryArray.COORDINATES;
 	    ShapeHolder shape = (ShapeHolder)e.nextElement();
+	    if (format == FORMAT_LWO2) {
+	    	if (((Lwo2Polygon) shape).getType() == Lwo2Polygon.TYPE_UNKNOWN) {
+	    		// FIXME: Currently a PTCH treated as if it is a FACE
+			    debugOutputLn(LINE_TRACE, "skipping polygon with unknown type");
+	    		continue;
+	    	}
+	    }
 	    debugOutputLn(LINE_TRACE, "about to create Arrays for Shape");
 	    debugOutputLn(VALUES, "shape = " + shape);
 	    shape.createArrays(true);
@@ -123,13 +130,15 @@ class J3dLwoParser extends LwoParser {
 	    if (shape.facetIndices != null)
 		indexCount = shape.facetIndices.length;
 	    debugOutputLn(VALUES, "numSurf = " + shape.numSurf);
+	    LwoSurface surf = null;
+	    String surfName;
+	    if (format == FORMAT_LWOB) {
 	    // Find the right surface.  Note: surfaces are indexed by
 	    // name.  So take this surf number, look up the name of that
 	    // surface in surfaceNameList, then take that name and
 	    // find the matching LwoSurface
-	    String surfName =
+	    surfName =
 		(String)surfNameList.elementAt(shape.numSurf - 1);
-	    LwoSurface surf = null;
 	    for (int surfNum = 0;
 		 surfNum < surfaceList.size();
 		 ++surfNum) {
@@ -141,10 +150,16 @@ class J3dLwoParser extends LwoParser {
 		    break;
 		}
 	    }
+	    }
+	    else {
+	    	surf = ((Lwo2Polygon) shape).getSurface();
+	    	surfName = ((Lwo2Polygon) shape).getSurfName();
+	    }
 	    if (surf == null) {
-		throw new IncorrectFormatException(
+		(new IncorrectFormatException(
 		    "bad surf for surfnum/name = " + shape.numSurf + ", " +
-		    surfName);
+		    surfName)).printStackTrace();
+			continue;
 	    }
 	    debugOutputLn(VALUES, "surf = " + surf);
 
